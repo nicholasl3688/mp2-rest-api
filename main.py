@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from src import DatasetInfo, DatasetStorage, HealthResponse, setup_logging
+from src import DatasetInfo, DatasetStorage, HealthResponse, setup_logging, ProcessConfig, ProcessingReport
 from data_pipeline import create_cleaning_report, process_data, validate_dataframe
 
 
@@ -42,8 +42,7 @@ async def upload_dataset(file: UploadFile = File(...)):
     metadata = storage.get_metadata(dataset_id)
     logger.info(f"Uploaded dataset: id={dataset_id}, filename={file.filename}, rows={len(df)} ")
     return metadata
-
-
+#returns metadata
 
 
 
@@ -60,3 +59,40 @@ def get_dataset(dataset_id: int, limit: int = Query(default=100, ge=1)):
     return {"id": dataset_id,
             "data": records,
             "total_rows": len(df)}
+# return {"id": dataset_id, "data": records, "total_rows": len(df)}
+
+
+
+
+@app.post(
+    "/datasets/{dataset_id}/process",
+    response_model=ProcessingReport
+)
+def process_dataset(dataset_id: int, config: ProcessConfig):
+    """Validate and process a stored dataset using MP1 functions."""
+    # TODO: retrieve, validate, process, report, update, and return.
+    df = storage.get(dataset_id)
+    if df is None:
+        raise HTTPException( status_code=404, detail="Dataset does not exist")
+    conf = config.model_dump()
+
+    for col in conf["validation"]["numeric_columns"]:
+        if col not in df.columns:
+            raise HTTPException( status_code=400, detail=f"Missing column: {col}")
+    
+    try:
+        validated_df = validate_dataframe(df, conf["validation"]["required_columns"], conf["validation"]["numeric_columns"])
+        rows_removed = len(df) - len(validated_df) 
+        validated_copy = validated_df.copy()
+        processed_df = process_data(validated_copy, conf)
+    except ValueError as error:
+        raise HTTPException( status_code=400, detail=str(error))
+
+    
+
+    logger.info(f"Processed dataset: id={dataset_id}, validation_removed={rows_removed}, rows_before={len(validated_copy)}, rows_after={len(processed_df)}")
+    report = create_cleaning_report(validated_copy, processed_df)
+
+    storage.update(dataset_id, processed_df)
+
+    return {"id": dataset_id, "validation_rows_removed": rows_removed, "cleaning_report": report}
