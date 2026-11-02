@@ -23,7 +23,7 @@ class DatasetStorage:
         entry = self._store.get(dataset_id)
         if entry is None:
             return None
-        logger.debug(f"Retrieved dataset copy: id={dataset_id}, rows=...")
+        logger.debug(f"Retrieved dataset copy: id={dataset_id}, rows={len(entry['data'])}")
         return entry["data"].copy() 
         
         
